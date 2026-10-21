@@ -79,6 +79,12 @@ Statuses should include at least `ok`, `insufficient_data`, `timed_out`, `unavai
 6. Execution validates mode, expiration, current broker state, quote price bounds, and protective exit support again before submission.
 7. Broker responses are mapped into normalized lifecycle events and reconciled against account positions/orders.
 
+Phase 2 implements the offline `OrderIntent`, `Exposure`, `CircuitState` and
+`RiskOutcome` in [the risk module](../src/trader_bot/risk.py), with typed limit and
+protective-stop parameters. Its [backtest/replay contract](./phase-2.md) is a local
+research bundle, not a broker request. Broker response mapping and actual order
+submission remain Phase 4 work.
+
 Illustrative stable reason-code groups:
 
 - `DATA_STALE`, `DATA_MISSING`, `DATA_INVALID`, `PROVIDER_UNAVAILABLE`

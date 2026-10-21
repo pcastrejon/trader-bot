@@ -59,6 +59,15 @@ These do not prevent repository setup, contract design, offline fixtures, or bac
 
 Recommended build order matters: contracts and deterministic logic are established before AI calls; multi-agent analysis is introduced only after signals and risk are independently testable; broker orders are connected after risk behavior has a complete test base.
 
+### Phase 2 implementation baseline
+
+The [Phase 2 guide](./phase-2.md) documents the implemented risk gate and offline
+runner. The risk gate supports normalized portfolio/reserved exposure and the
+paper-only short/leverage caps. The first causal backtest runner deliberately
+uses the existing long-only backtest strategy, one USD instrument, archived
+quotes and explicitly supplied sessions. It does not certify broker behavior or
+simulate portfolio-wide short borrow. Those limitations are included in reports.
+
 ## 5. Initial engineering backlog
 
 1. Add machine-readable configuration and mode isolation.

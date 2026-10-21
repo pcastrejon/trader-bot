@@ -172,7 +172,7 @@ class BenchmarkStrategy:
                 expires_at=last.ends_at + timedelta(minutes=5),
             )
             return Evaluation(instrument.instrument_id, EvaluationStatus.SIGNAL,
-                              "CROSSOVER", "Experimental signal; risk approval not implemented.",
+                              "CROSSOVER", "Experimental signal; risk checks not applied by this strategy.",
                               candidate)
         except DataError as exc:
             return Evaluation(instrument.instrument_id, EvaluationStatus.REJECTED,
@@ -219,7 +219,7 @@ class BenchmarkStrategy:
             raise DataError("DATA_FUTURE", "Quote timestamps are inconsistent with evaluation time.")
         if now - quote.observed_at > policy.max_quote_age:
             raise DataError("DATA_STALE", "Quote exceeds configured freshness threshold.")
-        _validate_bars(snapshot.bars, instrument, sessions, now, snapshot.source)
+        validate_bars(snapshot.bars, instrument, sessions, now, snapshot.source)
         last = snapshot.bars[-1]
         if last.ends_at > snapshot.received_at:
             raise DataError("DATA_FUTURE", "Snapshot predates its completed bars.")
@@ -254,7 +254,7 @@ def validate_instrument(
         raise DataError("INSTRUMENT_UNSUPPORTED", "Instrument/market support is not verified.")
 
 
-def _validate_bars(
+def validate_bars(
     bars: tuple[MarketBar, ...], instrument: Instrument,
     sessions: tuple[ExchangeSession, ...], as_of: datetime, source: str,
 ) -> None:

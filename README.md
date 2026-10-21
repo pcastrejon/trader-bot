@@ -8,7 +8,14 @@ Local-first, multi-agent trading research and paper-trading system. AI analysts 
 
 **Phase 1 — deterministic research:** read-only market-data interfaces, local CSV and Alpaca IEX adapters, bounded caching/usage limits, explicit sessions and eligibility filters, Decimal EMA/ATR indicators, and an experimental crossover benchmark.
 
-No model calls, broker account/order connections, risk approvals, backtest fill simulation, or order submission are implemented yet. `live` mode is explicitly disabled. The network data adapter is tested with mocked HTTP; real account/feed access is not certified.
+**Phase 2 — offline risk and replay:** deterministic position sizing and exposure limits,
+latched daily circuit breaker, bounded order intents, a causal single-symbol fill
+simulator, and versioned local backtest/replay bundles.
+
+No model calls, broker account/order connections, or order submission are implemented.
+Phase 2 risk approvals are offline intents only, not executable broker orders.
+`live` mode is explicitly disabled. The network data adapter is tested with mocked
+HTTP; real account/feed access is not certified.
 
 ## Development setup
 
@@ -70,5 +77,25 @@ approved trade and contains no quantity or order.
 
 See the [Phase 1 guide](docs/phase-1.md) for provider contracts, data validation,
 indicator definitions, usage accounting, testing, and limitations.
+
+## Offline Phase 2 example
+
+Generate a synthetic dataset, simulate it, and verify an exact replay:
+
+```bash
+mkdir -p local-data
+python examples/phase2_demo.py --output local-data/demo-input.json
+trader-bot backtest --input local-data/demo-input.json --output local-data/demo-report.json
+trader-bot replay --input local-data/demo-report.json
+```
+
+Use new filenames for subsequent runs: existing files are never overwritten.
+This example produces a **simulated loss**, not a profitable strategy claim.
+It uses only synthetic bars/quotes, no credentials or external services. Input and
+report bundles are stored locally; `local-data/` is excluded from Git.
+
+Read the [Phase 2 guide](docs/phase-2.md) for exact risk formulas, fill assumptions,
+reproducibility checks, and limitations. Missing data or unresolved positions cause
+a nonzero CLI exit rather than a successful-looking result.
 
 See [docs/](docs/README.md) for architecture, use cases, workflows, contracts, safety decisions, and the phased implementation plan.

@@ -18,12 +18,20 @@ from trader_bot.pipeline import ResearchPipeline
 from trader_bot.strategy import (
     BenchmarkStrategy, EligibilityPolicy, EvaluationStatus, ExchangeSession,
 )
+from trader_bot.backtest import BacktestRunner
+from trader_bot.contracts import RuntimeMode
+from trader_bot.replay import read_bundle, replay_bundle, write_bundle
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="trader-bot")
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("config-check", help="validate local runtime configuration")
+    backtest = subparsers.add_parser("backtest", help="run an offline JSON research bundle")
+    backtest.add_argument("--input", type=Path, required=True)
+    backtest.add_argument("--output", type=Path, required=True)
+    replay = subparsers.add_parser("replay", help="verify a recorded local research report")
+    replay.add_argument("--input", type=Path, required=True)
     research = subparsers.add_parser(
         "analyze-csv", help="inspect a local five-minute research signal; never submit orders"
     )
@@ -39,6 +47,30 @@ def main(argv: list[str] | None = None) -> int:
         help="acknowledge verification of the supplied instrument, data and session",
     )
     args = parser.parse_args(argv)
+
+    if args.command in ("backtest", "replay"):
+        try:
+            runtime = RuntimeConfig.from_env()
+            if runtime.mode is not RuntimeMode.BACKTEST:
+                raise ConfigurationError("Offline backtest/replay commands require backtest mode.")
+            if args.command == "backtest":
+                data, _ = read_bundle(args.input)
+                report = BacktestRunner().run(data)
+                write_bundle(args.output, data, report)
+            else:
+                report = replay_bundle(args.input)
+            print(
+                f"Offline {args.command}: initial={report.initial_equity} "
+                f"final={report.final_equity} realized_pnl={report.realized_pnl} "
+                f"fees={report.total_fees} max_drawdown={report.max_drawdown}"
+            )
+            print(f"Complete: {report.complete}; unresolved quantity: {report.open_quantity}")
+            print(f"Input fingerprint: {report.input_fingerprint}")
+            print("Research simulation only; no AI, broker connection or order submission.")
+            return 0 if report.complete else 2
+        except (ConfigurationError, DataError, ContractError) as exc:
+            print(f"Backtest/replay error: {exc}", file=sys.stderr)
+            return 2
 
     if args.command == "analyze-csv":
         try:

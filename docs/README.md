@@ -13,6 +13,8 @@ This folder defines the design to review before implementation begins. The docum
 
 Implementation guide: [Phase 1 market data and deterministic research](./phase-1.md).
 
+Implementation guide: [Phase 2 deterministic risk, backtesting and replay](./phase-2.md).
+
 The product requirements source remains [the refined specification](../spec/trader-bot-refined.en.md). If a design document conflicts with it or with a new operator decision, resolve the conflict and update the documents before implementation. Mermaid diagrams are source diagrams; keep them synchronized with the text.
 
 ## Design baseline
