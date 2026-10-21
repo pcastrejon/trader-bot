@@ -69,6 +69,14 @@ Statuses should include at least `ok`, `insufficient_data`, `timed_out`, `unavai
 - **Fundamental context:** Input contains supported financial metrics/statements with period and as-of time. In the first release this is informational and a data-quality warning source, not an intraday signal generator.
 - **Orchestrator:** Parallelizes independent analysis tasks, validates each result, handles timeout/invalid results explicitly, and aggregates only permitted context/veto fields. It has no broker credentials and no order tool.
 
+Phase 3 implements these envelopes in [the analyst module](../src/trader_bot/agents.py).
+The model generates only bounded summary/facts/interpretation, uncertainty, veto,
+warnings and citations; trusted code builds identity/version/request metadata.
+The [Phase 3 guide](./phase-3.md) specifies concrete evidence schemas, required-role
+and veto defaults, local inference opt-in, and recorded-outcome policy replay.
+`AnalysisDecision.can_continue` is an analysis-only hold/continue decision, not
+a strategy signal or a risk approval. Fundamental results cannot block or veto.
+
 ## 4. Signal, risk, and execution contract
 
 1. `CandidateSignal` records a deterministic strategy version and completed signal bar. It contains no AI-generated quantity.

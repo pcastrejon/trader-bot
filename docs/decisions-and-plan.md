@@ -39,7 +39,7 @@ These do not prevent repository setup, contract design, offline fixtures, or bac
 4. **Risk accounting:** Confirm equity/currency conversion, session boundary, realized/unrealized P&L, open risk aggregation, treatment of fees/slippage, and circuit-breaker reset/acknowledgment.
 5. **Order lifecycle:** Validate bounded limit entry semantics, one-bar expiration, protective stop coverage after partial fills, idempotency, cancellation, retries, and failed-exit recovery against paper API.
 6. **Shorting/leverage:** Confirm how broker simulator represents borrow availability/fees and buying power; fail closed if any short risk input is unsupported.
-7. **Agent policy:** Define whether each agent is required or optional for the benchmark and the exact deterministic rules for applying veto, timeout, conflicting evidence, or insufficient data. Current safe default: configured required agent failure means reject/hold.
+7. **Agent policy:** Phase 3 research defaults require technical/news results and honor either veto; fundamentals remain optional/informational. Any required failure holds. The explicit archived policy can change technical/news requirements. Confirm these research defaults before paper integration; see the [Phase 3 guide](./phase-3.md).
 8. **AI runtime:** Verify a local model can run without recurring costs and whether its latency/hardware is suitable; otherwise keep AI analysis disabled while preserving architecture contracts.
 9. **International scope:** Support only instrument/venue combinations individually verified for feed, currency conversion, session calendar, and paper broker access; otherwise skip and report.
 10. **Retention:** Decide whether seven-day retention applies only to operational audit records or also to backtest source datasets/results; ensure backups do not silently extend retention.
@@ -67,6 +67,16 @@ paper-only short/leverage caps. The first causal backtest runner deliberately
 uses the existing long-only backtest strategy, one USD instrument, archived
 quotes and explicitly supplied sessions. It does not certify broker behavior or
 simulate portfolio-wide short borrow. Those limitations are included in reports.
+
+### Phase 3 implementation baseline
+
+The [Phase 3 guide](./phase-3.md) defines bounded local evidence, independently
+replaceable analysts, deterministic parallel orchestration and failure policy,
+strict prompt/output handling, an opt-in loopback Ollama adapter with pinned
+model manifests, and recorded-outcome policy replay. No model is required by
+the deterministic baseline. Real model quality/hardware, news/fundamental
+provider entitlements and paper policy certification remain open gates.
+Orchestrator-to-paper integration and operational audit retention remain Phase 4.
 
 ## 5. Initial engineering backlog
 

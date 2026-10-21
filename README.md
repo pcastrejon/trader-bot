@@ -12,7 +12,12 @@ Local-first, multi-agent trading research and paper-trading system. AI analysts 
 latched daily circuit breaker, bounded order intents, a causal single-symbol fill
 simulator, and versioned local backtest/replay bundles.
 
-No model calls, broker account/order connections, or order submission are implemented.
+**Phase 3 — multi-agent context:** separate technical, news/sentiment and optional
+fundamental analysts, deterministic parallel orchestration, strict output and
+provenance validation, an opt-in local Ollama adapter, and recorded-analysis replay.
+
+Local model calls are disabled by default. Broker account/order connections and
+order submission are not implemented.
 Phase 2 risk approvals are offline intents only, not executable broker orders.
 `live` mode is explicitly disabled. The network data adapter is tested with mocked
 HTTP; real account/feed access is not certified.
@@ -97,5 +102,21 @@ report bundles are stored locally; `local-data/` is excluded from Git.
 Read the [Phase 2 guide](docs/phase-2.md) for exact risk formulas, fill assumptions,
 reproducibility checks, and limitations. Missing data or unresolved positions cause
 a nonzero CLI exit rather than a successful-looking result.
+
+## Offline Phase 3 example
+
+Record explicitly labeled synthetic analyst outcomes and replay their policy
+decision without model inference:
+
+```bash
+mkdir -p local-data
+python examples/phase3_demo.py --output local-data/agents-fixture.json --fixture-report
+trader-bot replay-analysis --input local-data/agents-fixture.json
+```
+
+This is a **test double, not AI analysis**. For real opt-in local inference,
+evidence contracts, fail-closed defaults, prompt-injection defenses and remaining
+limitations, read the [Phase 3 guide](docs/phase-3.md).
+Analysis cannot generate signals, change risk limits or submit orders.
 
 See [docs/](docs/README.md) for architecture, use cases, workflows, contracts, safety decisions, and the phased implementation plan.

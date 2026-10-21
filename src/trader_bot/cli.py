@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import sys
 from datetime import timedelta
 from decimal import InvalidOperation
@@ -21,12 +22,28 @@ from trader_bot.strategy import (
 from trader_bot.backtest import BacktestRunner
 from trader_bot.contracts import RuntimeMode
 from trader_bot.replay import read_bundle, replay_bundle, write_bundle
+from trader_bot.agents import AgentOrchestrator, DisabledModel, local_agents
+from trader_bot.analysis_io import read_analysis, replay_analysis, write_analysis
+from trader_bot.local_model import LocalModelConfig, OllamaLocalModel
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="trader-bot")
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("config-check", help="validate local runtime configuration")
+    analysis = subparsers.add_parser(
+        "analyze-agents", help="analyze a local evidence snapshot; never approve or submit orders",
+    )
+    analysis.add_argument("--input", type=Path, required=True)
+    analysis.add_argument("--output", type=Path, required=True)
+    analysis.add_argument("--as-of", required=True)
+    analysis.add_argument("--model")
+    analysis.add_argument("--model-version")
+    analysis.add_argument("--port", type=int, default=11434)
+    analysis_replay = subparsers.add_parser(
+        "replay-analysis", help="revalidate recorded analyst outcomes and replay policy, without inference",
+    )
+    analysis_replay.add_argument("--input", type=Path, required=True)
     backtest = subparsers.add_parser("backtest", help="run an offline JSON research bundle")
     backtest.add_argument("--input", type=Path, required=True)
     backtest.add_argument("--output", type=Path, required=True)
@@ -47,6 +64,39 @@ def main(argv: list[str] | None = None) -> int:
         help="acknowledge verification of the supplied instrument, data and session",
     )
     args = parser.parse_args(argv)
+
+    if args.command in ("analyze-agents", "replay-analysis"):
+        try:
+            runtime = RuntimeConfig.from_env()
+            if args.command == "replay-analysis":
+                decision = replay_analysis(args.input)
+            else:
+                correlation, instrument, evidence, policy, _ = read_analysis(args.input)
+                as_of = parse_time(args.as_of)
+                model = DisabledModel()
+                if runtime.local_model_enabled:
+                    if args.model is None or args.model_version is None:
+                        raise ConfigurationError("Enabled inference requires --model and --model-version.")
+                    local_model = OllamaLocalModel(LocalModelConfig(
+                        args.model, args.model_version, args.port, enabled=True,
+                    ))
+                    agents = local_agents(local_model)
+                else:
+                    agents = local_agents(model)
+                decision = asyncio.run(AgentOrchestrator(
+                    agents, policy, clock=lambda: as_of,
+                ).analyze(correlation, instrument, evidence))
+                write_analysis(args.output, correlation, instrument, evidence, policy, decision)
+            for result in decision.report.results:
+                print(f"{result.role.value}: {result.status.value}: {result.summary}")
+            print(f"Analysis can continue: {decision.can_continue}")
+            for code in decision.reason_codes:
+                print(code)
+            print("Context only; not a signal, risk approval or broker order.")
+            return 0 if decision.can_continue else 2
+        except (ConfigurationError, DataError, ContractError, InvalidOperation) as exc:
+            print(f"Analysis error: {exc}", file=sys.stderr)
+            return 2
 
     if args.command in ("backtest", "replay"):
         try:
