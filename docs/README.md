@@ -11,6 +11,8 @@ This folder defines the design to review before implementation begins. The docum
 5. [Security and operations](./security-and-operations.md) — trust boundaries, failure behavior, audit, controls, and operational acceptance.
 6. [Decisions and implementation plan](./decisions-and-plan.md) — accepted design choices, unresolved blockers, and phased delivery.
 
+Implementation guide: [Phase 1 market data and deterministic research](./phase-1.md).
+
 The product requirements source remains [the refined specification](../spec/trader-bot-refined.en.md). If a design document conflicts with it or with a new operator decision, resolve the conflict and update the documents before implementation. Mermaid diagrams are source diagrams; keep them synchronized with the text.
 
 ## Design baseline
