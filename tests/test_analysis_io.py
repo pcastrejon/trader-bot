@@ -107,6 +107,15 @@ class AnalysisBundleTests(unittest.TestCase):
         with self.assertRaises(DataError):
             replay_analysis(self.path)
 
+    def test_numeric_claims_revalidated_even_with_recomputed_fingerprint(self) -> None:
+        self.write()
+        payload = json.loads(self.path.read_text())
+        payload["decision"]["report"]["results"][0]["summary"] = "Volume is 100,000 shares."
+        payload["decision_fingerprint"] = fingerprint(payload["decision"])
+        self.path.write_text(json.dumps(payload))
+        with self.assertRaises(DataError):
+            replay_analysis(self.path)
+
     def test_existing_file_and_symlink_not_overwritten(self) -> None:
         self.path.write_text("keep")
         with self.assertRaises(DataError):

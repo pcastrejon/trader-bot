@@ -22,7 +22,10 @@ class SyntheticModel:
 
     identity = ModelIdentity("fixture", "synthetic-demo-not-ai", "1")
 
-    async def complete(self, system: str, user: str, timeout_seconds: float) -> str:
+    async def complete(
+        self, system: str, user: str, timeout_seconds: float, *,
+        response_schema: dict[str, object] | None = None,
+    ) -> str:
         await asyncio.sleep(0)
         item = json.loads(user)
         return json.dumps({

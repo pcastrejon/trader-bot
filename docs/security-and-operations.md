@@ -39,6 +39,7 @@ The diagram's input arrows indicate data crossing a boundary, not trust. Provide
 
 - Backtest and paper modes cannot load live credentials/endpoints. Live execution is not delivered in the first release.
 - Paper mode is visibly identified at startup, in logs, alerts, and order summaries.
+- `paper-pause` persistently disables new entries; it does not cancel existing orders or liquidate positions. Resumption requires explicit broker reconciliation.
 - Shorting/leverage are paper-only in the first release: gross exposure ≤ 1.25× equity; total short exposure ≤ 10%; one short ≤ 2.5%; one position notional ≤ 5%; planned risk at stop ≤ 0.25% per trade; combined planned open risk ≤ 1%.
 - Daily drawdown breaker at 1% blocks entries, cancels eligible unfilled entry orders, preserves protective exits, and requires operator acknowledgment. This provisional accounting/policy must be verified in tests before paper orders are enabled.
 - A protective stop is not a guaranteed maximum loss. Market gaps, halts, rejection, and slippage can exceed planned risk.

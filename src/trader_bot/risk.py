@@ -191,12 +191,13 @@ class RiskWarden:
         reconciled: bool, protective_exit_supported: bool,
         entry_limit: Decimal | None = None, borrow_available: bool = False,
         borrow_cost_per_share: Decimal | None = None,
+        entry_notional_cap: Decimal | None = None,
     ) -> RiskOutcome:
         with localcontext(Context(prec=28)):
             return self._evaluate(
                 signal, instrument, quote, account, exposures, circuit, session, runtime,
                 eligibility, as_of, entry_limit, reconciled, protective_exit_supported,
-                borrow_available, borrow_cost_per_share,
+                borrow_available, borrow_cost_per_share, entry_notional_cap,
             )
 
     def _evaluate(
@@ -205,7 +206,7 @@ class RiskWarden:
         circuit: DailyCircuitBreaker, session: ExchangeSession, runtime: RuntimeConfig,
         eligibility: EligibilityPolicy, as_of: datetime, entry_limit: Decimal | None,
         reconciled: bool, protective_exit_supported: bool, borrow_available: bool,
-        borrow_cost_per_share: Decimal | None,
+        borrow_cost_per_share: Decimal | None, entry_notional_cap: Decimal | None,
     ) -> RiskOutcome:
         now = utc_time(as_of)
         policy = self.policy
@@ -268,6 +269,8 @@ class RiskWarden:
             reference = quote.bid if is_short else quote.ask
             limit = reference if entry_limit is None else entry_limit
             decimal_amount(limit, "entry limit", positive=True)
+            if entry_notional_cap is not None:
+                decimal_amount(entry_notional_cap, "entry notional cap", positive=True)
             if abs(limit - reference) / reference * 10000 > policy.max_entry_deviation_bps:
                 raise DataError("PRICE_BOUND", "Entry limit exceeds quote deviation bound.")
             limit = round_step(limit, policy.price_tick, up=is_short)
@@ -297,6 +300,8 @@ class RiskWarden:
                 "GROSS_EXPOSURE": (account.equity * gross_cap - gross) / limit,
                 "BUYING_POWER": account.buying_power / (limit + policy.round_trip_cost_per_share),
             }
+            if entry_notional_cap is not None:
+                capacities["ENTRY_NOTIONAL_CAP"] = entry_notional_cap / limit
             if is_short:
                 capacities["SHORT_CAP"] = min(
                     account.equity * policy.short_position / limit,

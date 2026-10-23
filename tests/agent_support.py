@@ -53,13 +53,18 @@ class FixtureModel:
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
+        self.schemas: list[dict[str, object] | None] = []
         self.outputs: dict[str, str] = {}
         self.delay = 0.0
         self.started = 0
         self.concurrent = 0
 
-    async def complete(self, system: str, user: str, timeout_seconds: float) -> str:
+    async def complete(
+        self, system: str, user: str, timeout_seconds: float, *,
+        response_schema: dict[str, object] | None = None,
+    ) -> str:
         self.calls.append((system, user))
+        self.schemas.append(response_schema)
         self.started += 1
         self.concurrent = max(self.concurrent, self.started)
         try:

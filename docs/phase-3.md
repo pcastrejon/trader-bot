@@ -93,8 +93,13 @@ may deliberately make either optional or disable its veto. This policy is
 archived, never inferred from model text. Empty tuples are an explicit analysis
 opt-out, **not** permission to bypass strategy, risk, or execution checks.
 
-Independent roles run concurrently with a common deadline (10 seconds by
-default, configurable from 1 to 30). Results are ordered by the canonical
+Roles share a common deadline (10 seconds by default, configurable from 1 to
+30), including queue time. For local inference, required and veto-capable
+roles are scheduled before optional informational roles. A shared Ollama adapter
+serializes its generation workers to avoid competing CPU generations; the worker
+holds its lock until socket work ends, even if its async caller is canceled.
+Optional analysis gets only the time remaining, never a fresh deadline.
+Fixture/non-local adapters retain concurrent scheduling. Results are ordered by the canonical
 `AgentRole` enum, not completion order. Missing/invalid/unavailable/timeout
 outcomes are retained explicitly. Reason codes include `AGENT_INVALID`,
 `AGENT_INSUFFICIENT_DATA`, `AGENT_UNAVAILABLE`, `AGENT_TIMEOUT`, and `AGENT_VETO`.
@@ -105,7 +110,9 @@ The local adapter additionally applies socket and async inference timeouts.
 Cancellation cannot forcibly kill a standard-library HTTP worker thread;
 executor cleanup can outlast the orchestration deadline until socket operations
 finish or time out. A trusted local daemon is required; this is not a hard
-real-time inference service.
+real-time inference service. Other processes/adapters can still contend for the
+same daemon, and HTTP cancellation does not prove daemon-side generation stopped.
+CPU-only hardware may still be too slow; a timeout remains a hold for required roles.
 
 ## Prompt and output defenses
 
@@ -141,6 +148,19 @@ or cause a conservative hold. Safety does not depend on textual detection:
 there are no tools, no executable action fields, and no numeric/order authority.
 Human review and future model evaluation remain necessary.
 
+Successful results also undergo a conservative numeric-value check, both during
+inference and during archive/replay validation. Digit-based values in summaries,
+facts, interpretations and warnings must occur in the cited role's evidence
+metrics, news text or financial period date. Grouped decimals and scientific
+notation are normalized with Decimal; percentages are distinct from raw values.
+For example, volume `100,000` is rejected when cited evidence supplies `10,000`.
+Spelled-out English numbers and magnitude suffixes are rejected rather than
+guessed or converted. Prompts prefer qualitative prose and exact, unscaled digits.
+This deliberately conservative check may reject legitimate paraphrases. It
+does not establish metric/value or unit attribution, validate calculations, or
+detect all linguistic numerical claims. A value copied from the wrong metric
+can still pass; qualitative hallucinations still require human review.
+
 ## Local inference and zero recurring cost
 
 Inference is disabled by default. Enabling it requires all of:
@@ -162,9 +182,24 @@ match the pin before each generation; bare and `sha256:`-prefixed Ollama digests
 are accepted. The daemon/model store is trusted and must not be modified during
 analysis. Pin verification is not cryptographic attestation of daemon behavior.
 
-Generation requests use JSON mode, temperature/seed zero and a 1,024-token output
-bound. These settings improve repeatability but do not guarantee identical LLM
-generation. Model/hardware quality and latency have **not** been certified.
+Analyst generation requests pass a JSON Schema through Ollama's `format` field,
+also included in the system prompt. The schema requires the seven output fields,
+disallows additional fields, bounds text/list sizes, restricts uncertainty values,
+and requires at least one citation drawn from the current role's supplied
+reference IDs. Fundamental veto is constrained to false; technical/news veto
+remains a model judgment. Explicit allowed citation IDs are included alongside
+the untrusted evidence. Independent response parsing and policy validation remain
+mandatory, even if the daemon ignores some schema constraints. Schema errors
+do not trigger a retry or downgrade to unconstrained JSON.
+
+Generation uses temperature/seed zero and a 256-token output bound, with concise
+generation-schema limits (240-character summary/interpretation and up to three
+160-character facts/warnings); responses
+reported as token-limit truncated are rejected. These settings improve
+repeatability but do not guarantee identical LLM generation, factual accuracy,
+or completion within the deadline. Model/hardware quality and latency have
+**not** been certified. Required analysts still fail closed on invalid output or
+timeouts, including on CPU-only hardware.
 
 ## Runnable synthetic walkthrough
 
@@ -230,8 +265,9 @@ evidence are local report data and may themselves be sensitive.
 
 `local-data/` remains Git-ignored. Research report/dataset retention is still an
 open product decision. Automatic seven-day operational audit storage/rotation
-and durable paper workflow integration remain Phase 4 work; this CLI does not
-silently delete research archives or promise an implemented retention daemon.
+remains Phase 4 work. The programmatic paper workflow integration is described
+in the [Phase 4 guide](./phase-4.md); this CLI does not silently delete research
+archives or promise an implemented retention daemon.
 
 ## Validation
 

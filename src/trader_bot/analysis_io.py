@@ -10,7 +10,7 @@ from pathlib import Path
 from trader_bot.agents import (
     AnalysisDecision, AnalysisPolicy, Evidence, Metric, ModelIdentity, PROMPT_VERSION,
     aggregate, evidence_issue, fingerprint, object_fields, strict_json,
-    string_list, text, validate_evidence, validate_result,
+    string_list, text, validate_evidence, validate_result, validate_numeric_claims,
 )
 from trader_bot.backtest import json_value
 from trader_bot.contracts import (
@@ -172,6 +172,7 @@ def rebuild_decision(
             tuple(value.reference for value in selected),
         )
         validate_result(result, request)
+        validate_numeric_claims(result, selected)
         issue = evidence_issue(selected, request, policy)
         if issue is not None and (result.status, result.summary) != issue:
             raise ContractError("Recorded outcome contradicts evidence validation.")

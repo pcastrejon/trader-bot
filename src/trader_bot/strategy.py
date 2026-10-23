@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 from trader_bot.config import RuntimeConfig
 from trader_bot.contracts import (
-    AssetType, CandidateSignal, Instrument, MarketBar, RuntimeMode, TradeDirection,
+    AssetType, CandidateSignal, Instrument, MarketBar, Quote, RuntimeMode, TradeDirection,
 )
 from trader_bot.indicators import atr, ema
 from trader_bot.market_data import DataError, MarketSnapshot, utc_time
@@ -98,6 +98,7 @@ class Evaluation:
     code: str
     explanation: str
     candidate: CandidateSignal | None = None
+    quote: Quote | None = None
 
 
 class BenchmarkStrategy:
@@ -173,7 +174,7 @@ class BenchmarkStrategy:
             )
             return Evaluation(instrument.instrument_id, EvaluationStatus.SIGNAL,
                               "CROSSOVER", "Experimental signal; risk checks not applied by this strategy.",
-                              candidate)
+                              candidate, snapshot.quote)
         except DataError as exc:
             return Evaluation(instrument.instrument_id, EvaluationStatus.REJECTED,
                               exc.code, str(exc))

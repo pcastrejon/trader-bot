@@ -39,6 +39,8 @@ class RuntimeConfig:
     local_model_enabled: bool = False
     paper_allow_shorting: bool = False
     paper_allow_leverage: bool = False
+    paper_order_submission_enabled: bool = False
+    paper_execution_capabilities_verified: bool = False
     paper_credentials: PaperCredentials | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
@@ -64,6 +66,10 @@ class RuntimeConfig:
             self.paper_allow_leverage, bool
         ):
             raise ConfigurationError("Paper trading feature flags must be booleans.")
+        if not isinstance(self.paper_order_submission_enabled, bool):
+            raise ConfigurationError("paper_order_submission_enabled must be a boolean.")
+        if not isinstance(self.paper_execution_capabilities_verified, bool):
+            raise ConfigurationError("paper_execution_capabilities_verified must be a boolean.")
         if len(set(self.watchlist)) != len(self.watchlist):
             raise ConfigurationError("Watchlist entries must be unique.")
         if any(not symbol or symbol != symbol.strip() for symbol in self.watchlist):
@@ -87,10 +93,9 @@ class RuntimeConfig:
             )
         if self.mode is not RuntimeMode.PAPER and (
             self.paper_allow_shorting or self.paper_allow_leverage
+            or self.paper_order_submission_enabled or self.paper_execution_capabilities_verified
         ):
-            raise ConfigurationError(
-                "Paper-only shorting and leverage flags require paper mode."
-            )
+            raise ConfigurationError("Paper-only features require paper mode.")
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> RuntimeConfig:
@@ -134,6 +139,14 @@ class RuntimeConfig:
             values.get("TRADER_BOT_PAPER_ALLOW_LEVERAGE", "false"),
             "TRADER_BOT_PAPER_ALLOW_LEVERAGE",
         )
+        order_submission_enabled = _parse_bool(
+            values.get("TRADER_BOT_PAPER_ORDER_SUBMISSION_ENABLED", "false"),
+            "TRADER_BOT_PAPER_ORDER_SUBMISSION_ENABLED",
+        )
+        execution_capabilities_verified = _parse_bool(
+            values.get("TRADER_BOT_PAPER_EXECUTION_CAPABILITIES_VERIFIED", "false"),
+            "TRADER_BOT_PAPER_EXECUTION_CAPABILITIES_VERIFIED",
+        )
 
         credentials = None
         if mode is RuntimeMode.PAPER:
@@ -153,6 +166,8 @@ class RuntimeConfig:
             local_model_enabled=local_model_enabled,
             paper_allow_shorting=allow_shorting,
             paper_allow_leverage=allow_leverage,
+            paper_order_submission_enabled=order_submission_enabled,
+            paper_execution_capabilities_verified=execution_capabilities_verified,
             paper_credentials=credentials,
         )
 

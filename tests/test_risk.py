@@ -67,6 +67,18 @@ class RiskWardenTests(unittest.TestCase):
         self.assertEqual(result.intent.expires_at, self.signal.expires_at)
         self.assertTrue(result.checks)
 
+    def test_entry_notional_cap_bounds_risk_approved_quantity(self) -> None:
+        result = self.warden.evaluate(
+            self.signal, INSTRUMENT, self.quote, self.account, (),
+            self.circuit, SESSION, self.runtime, POLICY, NOW,
+            reconciled=True, protective_exit_supported=True,
+            entry_notional_cap=D("100"),
+        )
+
+        self.assertTrue(result.decision.allowed)
+        self.assertEqual(result.decision.notional, D("100"))
+        self.assertEqual(result.intent.quantity, D("1"))
+
     def test_risk_budget_and_rounding_never_exceeded(self) -> None:
         self.warden = RiskWarden(replace(self.policy, position_notional=D("1")))
         for stop in ("99.99", "99", "98", "97.31", "90", "1"):

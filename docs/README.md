@@ -1,6 +1,9 @@
 # Design Documentation
 
-This folder defines the design to review before implementation begins. The documents are intentionally technology-light where provider behavior or policy still needs validation. They describe a personal, local-first, multi-agent trading system; they do not claim that any strategy will be profitable.
+This folder contains the design baseline and implementation guides. Provider
+behavior or policy that still needs validation is called out explicitly. The
+documents describe a personal, local-first, multi-agent trading system; they do
+not claim that any strategy will be profitable.
 
 ## Reading order
 
@@ -16,6 +19,8 @@ Implementation guide: [Phase 1 market data and deterministic research](./phase-1
 Implementation guide: [Phase 2 deterministic risk, backtesting and replay](./phase-2.md).
 
 Implementation guide: [Phase 3 multi-agent analysis and local-model replay](./phase-3.md).
+
+Implementation guide: [Phase 4 paper broker execution groundwork](./phase-4.md).
 
 The product requirements source remains [the refined specification](../spec/trader-bot-refined.en.md). If a design document conflicts with it or with a new operator decision, resolve the conflict and update the documents before implementation. Mermaid diagrams are source diagrams; keep them synchronized with the text.
 

@@ -52,7 +52,10 @@ class LocalModelTests(unittest.IsolatedAsyncioTestCase):
             connection.getresponse.side_effect = [installed(), generated()]
             result = await self.model.complete("system", "user", 2)
             self.assertEqual(result, completion())
-            factory.assert_called_once_with("127.0.0.1", 11434, timeout=2)
+            factory.assert_called_once()
+            self.assertEqual(factory.call_args.args, ("127.0.0.1", 11434))
+            self.assertGreater(factory.call_args.kwargs["timeout"], 0)
+            self.assertLessEqual(factory.call_args.kwargs["timeout"], 2)
             calls = connection.request.call_args_list
             self.assertEqual(calls[0].args, ("GET", "/api/tags"))
             self.assertEqual(calls[1].args[:2], ("POST", "/api/chat"))
@@ -69,6 +72,36 @@ class LocalModelTests(unittest.IsolatedAsyncioTestCase):
                 installed(digest=DIGEST.removeprefix("sha256:")), generated(),
             ]
             self.assertEqual(await self.model.complete("system", "user", 1), completion())
+
+    async def test_response_schema_is_sent_as_format_and_grounded_in_system_prompt(self) -> None:
+        schema = {
+            "type": "object", "properties": {"summary": {"type": "string"}},
+            "required": ["summary"], "additionalProperties": False,
+        }
+        with patch("trader_bot.local_model.http.client.HTTPConnection") as factory:
+            connection = factory.return_value
+            connection.getresponse.side_effect = [installed(), generated()]
+            await self.model.complete("system", "user", 2, response_schema=schema)
+            payload = json.loads(connection.request.call_args_list[1].args[2])
+            self.assertEqual(payload["format"], schema)
+            self.assertIn(
+                json.dumps(schema, sort_keys=True), payload["messages"][0]["content"],
+            )
+            self.assertEqual(payload["messages"][1]["content"], "user")
+            self.assertEqual(payload["options"]["num_predict"], 256)
+
+    async def test_schema_rejected_by_daemon_does_not_retry_without_constraints(self) -> None:
+        with patch("trader_bot.local_model.http.client.HTTPConnection") as factory:
+            connection = factory.return_value
+            connection.getresponse.side_effect = [
+                installed(), response({"error": "schema unsupported"}, 400),
+            ]
+            with self.assertRaises(ModelUnavailable):
+                await self.model.complete(
+                    "system", "user", 1, response_schema={"type": "object"},
+                )
+            self.assertEqual(connection.request.call_count, 2)
+            connection.close.assert_called_once()
 
     def test_remote_names_unpinned_versions_and_bad_ports_rejected(self) -> None:
         for model, digest, port in (
@@ -111,6 +144,7 @@ class LocalModelTests(unittest.IsolatedAsyncioTestCase):
     async def test_malformed_and_incomplete_response_rejected(self) -> None:
         for output in (
             generated(model="other"), generated(done=False),
+            generated(done_reason="length"),
             generated(message={"role": "assistant", "content": completion(), "tool_calls": []}),
             generated(message={"role": "user", "content": completion()}),
             response([]),
@@ -166,6 +200,37 @@ class LocalModelTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ContractError):
                 await self.model.complete("x" * 400001, "user", 1)
             factory.assert_not_called()
+
+    async def test_queue_timeout_does_not_start_another_generation_after_cancellation(self) -> None:
+        entered = threading.Event()
+        release = threading.Event()
+        finished = threading.Event()
+
+        def generate(*_args: object) -> str:
+            entered.set()
+            try:
+                if not release.wait(2):
+                    raise AssertionError("Test did not release worker.")
+                return completion()
+            finally:
+                finished.set()
+
+        with patch.object(self.model, "_generate", side_effect=generate) as worker:
+            first = asyncio.create_task(self.model.complete("system", "user", 0.1))
+            try:
+                self.assertTrue(await asyncio.to_thread(entered.wait, 1))
+                with self.assertRaises(TimeoutError):
+                    await first
+                with self.assertRaises(TimeoutError):
+                    await self.model.complete("system", "queued", 0.01)
+                self.assertEqual(worker.call_count, 1)
+            finally:
+                release.set()
+                self.assertTrue(await asyncio.to_thread(finished.wait, 1))
+                if not first.done():
+                    first.cancel()
+                    with self.assertRaises(asyncio.CancelledError):
+                        await first
 
 
 class LoopbackIntegrationTests(unittest.TestCase):

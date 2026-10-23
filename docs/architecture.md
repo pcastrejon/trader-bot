@@ -147,7 +147,7 @@ Backtests must be runnable without broker credentials. Paper configuration must 
 | Phase 1 — Data/strategy | Implement deterministic indicators and candidate signals independently of AI. |
 | Phase 2 — Risk/backtest | Implement deterministic risk gate and replay; no agent can approve a trade. |
 | Phase 3 — Multi-agent analysis | Implement technical context, news/sentiment, and fundamental context agents; then implement orchestrator, local model adapter, validation, aggregation, and agent evaluation. |
-| Phase 4 — Paper integration | Wire orchestrator report → deterministic strategy → risk gate → paper adapter. Agents receive no broker credentials and cannot call order methods. |
+| Phase 4 — Paper integration | Programmatic controller wires deterministic strategy, required orchestrator policy, risk gate and gated paper adapter. Agents receive no broker credentials and cannot call order methods. |
 | Phase 5 — Validation | Exercise timeout, malformed output, conflicting context, unavailable local model, untrusted news, replayability, and cost limits. |
 
 The strategy can operate deterministically if the optional model is disabled. If an enabled strategy configuration requires agent output and that output is absent, invalid, stale, or timed out, the proposal is rejected or held; no successful-looking fallback is permitted.

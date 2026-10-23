@@ -81,6 +81,24 @@ class RuntimeConfigTests(unittest.TestCase):
                 {"TRADER_BOT_PAPER_ALLOW_SHORTING": "true"}
             )
 
+    def test_paper_order_submission_is_opt_in_and_paper_only(self) -> None:
+        self.assertFalse(RuntimeConfig.from_env({}).paper_order_submission_enabled)
+        config = RuntimeConfig.from_env(
+            {
+                "TRADER_BOT_MODE": "paper",
+                "TRADER_BOT_PAPER_API_KEY": "paper-key",
+                "TRADER_BOT_PAPER_API_SECRET": "paper-secret",
+                "TRADER_BOT_PAPER_ORDER_SUBMISSION_ENABLED": "true",
+                "TRADER_BOT_PAPER_EXECUTION_CAPABILITIES_VERIFIED": "true",
+            }
+        )
+        self.assertTrue(config.paper_order_submission_enabled)
+        self.assertTrue(config.paper_execution_capabilities_verified)
+        with self.assertRaisesRegex(ConfigurationError, "require paper mode"):
+            RuntimeConfig.from_env(
+                {"TRADER_BOT_PAPER_ORDER_SUBMISSION_ENABLED": "true"}
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

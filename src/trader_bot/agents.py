@@ -6,7 +6,7 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 import json
 import re
 from typing import Protocol
@@ -18,7 +18,7 @@ from trader_bot.contracts import (
 )
 
 
-PROMPT_VERSION = "analysts-1"
+PROMPT_VERSION = "analysts-3"
 ROLES = tuple(AgentRole)
 TECHNICAL_METRICS = {"close", "volume", "ema9", "ema21", "ema50", "atr14"}
 _INSTRUCTIONS = re.compile(
@@ -196,13 +196,19 @@ class AnalysisModel(Protocol):
     @property
     def identity(self) -> ModelIdentity: ...
 
-    async def complete(self, system: str, user: str, timeout_seconds: float) -> str: ...
+    async def complete(
+        self, system: str, user: str, timeout_seconds: float, *,
+        response_schema: dict[str, object] | None = None,
+    ) -> str: ...
 
 
 class DisabledModel:
     identity = ModelIdentity("disabled", "disabled", "1")
 
-    async def complete(self, system: str, user: str, timeout_seconds: float) -> str:
+    async def complete(
+        self, system: str, user: str, timeout_seconds: float, *,
+        response_schema: dict[str, object] | None = None,
+    ) -> str:
         raise ModelUnavailable("Local inference is disabled.")
 
 
@@ -229,8 +235,42 @@ class AnalystAgent:
         system, user = self.prompt(request, evidence)
         raw = await self.model.complete(
             system, user, (request.deadline - request.created_at).total_seconds(),
+            response_schema=self.response_schema(request),
         )
-        return self.parse(request, raw)
+        result = self.parse(request, raw)
+        validate_numeric_claims(result, evidence)
+        return result
+
+    def response_schema(self, request: AgentRequest) -> dict[str, object]:
+        refs = [ref.reference for ref in request.input_refs]
+        if not refs:
+            raise ContractError("Analyst output requires supplied evidence references.")
+        properties = {
+            "summary": {"type": "string", "minLength": 1, "maxLength": 240},
+            "facts": {
+                "type": "array", "maxItems": 3, "uniqueItems": True,
+                "items": {"type": "string", "minLength": 1, "maxLength": 160},
+            },
+            "interpretation": {"type": "string", "minLength": 1, "maxLength": 240},
+            "uncertainty": {"type": "string", "enum": [item.value for item in Uncertainty]},
+            "veto": (
+                {"type": "boolean", "enum": [False]}
+                if self.role is AgentRole.FUNDAMENTAL_CONTEXT else {"type": "boolean"}
+            ),
+            "warnings": {
+                "type": "array", "maxItems": 3, "uniqueItems": True,
+                "items": {"type": "string", "minLength": 1, "maxLength": 160},
+            },
+            "source_refs": {
+                "type": "array", "minItems": 1, "maxItems": min(32, len(refs)),
+                "uniqueItems": True,
+                "items": {"type": "string", "enum": refs},
+            },
+        }
+        return {
+            "type": "object", "properties": properties,
+            "required": list(properties), "additionalProperties": False,
+        }
 
     def prompt(self, request: AgentRequest, evidence: tuple[Evidence, ...]) -> tuple[str, str]:
         instruction = {
@@ -249,11 +289,17 @@ class AnalystAgent:
             "uncertainty (low/medium/high/unknown), veto (boolean), warnings (string list), "
             "source_refs (list of supplied reference IDs), facts (string list), "
             "interpretation (nonempty string). Cite at least one supplied reference. "
+            "Copy citation IDs exactly from allowed_source_refs, never source names. "
+            "Be concise: use short summaries, facts and interpretations. "
+            "Prefer qualitative context; omit numeric restatements unless necessary. "
+            "Copy numeric values exactly, using digits without scaling, calculations, "
+            "percent conversions or spelled-out numbers. "
             "Do not claim facts absent from the supplied evidence."
         )
         user = json.dumps({
             "schema_version": "1", "role": self.role.value,
             "instrument_id": request.instrument_id,
+            "allowed_source_refs": [ref.reference for ref in request.input_refs],
             "untrusted_evidence": json_value(evidence),
         }, sort_keys=True, allow_nan=False)
         return system, user
@@ -381,6 +427,47 @@ def validate_result(result: AgentResult, request: AgentRequest) -> None:
         raise ContractError("Analyst result has invalid references or fundamental veto.")
 
 
+_NUMBER = re.compile(
+    r"(?<![\w.])[-+]?(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)"
+    r"(?:[eE][-+]?\d+)?(?:\s*%)?(?!\w)"
+)
+_NUMBER_WORD = re.compile(
+    r"\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
+    r"thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|"
+    r"forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion|"
+    r"trillion|percent|percentage|basis\s+points?)\b|(?<=\d)\s*[kmbt]\b",
+    re.IGNORECASE,
+)
+
+
+def numeric_values(value: str) -> set[tuple[Decimal, bool]]:
+    values = set()
+    for match in _NUMBER.finditer(value):
+        token = match.group().replace(",", "").replace(" ", "")
+        percentage = token.endswith("%")
+        try:
+            values.add((Decimal(token.rstrip("%")), percentage))
+        except InvalidOperation as exc:
+            raise ContractError("Invalid numeric claim.") from exc
+    return values
+
+
+def validate_numeric_claims(result: AgentResult, evidence: tuple[Evidence, ...]) -> None:
+    if result.status is not AgentStatus.OK:
+        return
+    allowed: set[tuple[Decimal, bool]] = set()
+    for record in evidence:
+        if record.role is not result.role or record.reference.reference not in result.source_refs:
+            continue
+        allowed.update((metric.value, metric.unit == "%") for metric in record.metrics)
+        allowed.update(numeric_values(record.content))
+        if record.period_ends_at is not None:
+            allowed.update(numeric_values(record.period_ends_at.isoformat()))
+    for value in (result.summary, *result.warnings):
+        if _NUMBER_WORD.search(value) or not numeric_values(value) <= allowed:
+            raise ContractError("Analyst output contains unsupported numeric claims.")
+
+
 @dataclass(frozen=True, slots=True)
 class AnalysisDecision:
     report: AgentAnalysisReport
@@ -458,6 +545,7 @@ class AgentOrchestrator:
                 if self.clock() >= deadline or loop.time() >= monotonic_deadline:
                     raise TimeoutError
                 validate_result(result, request)
+                validate_numeric_claims(result, selected)
                 if (
                     result.model_provider, result.model_name, result.model_version
                 ) != (
@@ -475,7 +563,15 @@ class AgentOrchestrator:
                 return failure(request, agent.model.identity, AgentStatus.INVALID,
                                "AGENT_INVALID: Analyst output failed validation.")
 
-        results = tuple(await asyncio.gather(*(invoke(role) for role in ROLES)))
+        local_roles = tuple(
+            role for role in ROLES if self.agents[role].model.identity.provider == "local"
+        )
+        priority = set(self.policy.required_roles) | set(self.policy.veto_roles)
+        first = tuple(role for role in ROLES if role not in local_roles or role in priority)
+        deferred = tuple(role for role in local_roles if role not in priority)
+        completed = dict(zip(first, await asyncio.gather(*(invoke(role) for role in first))))
+        completed.update(zip(deferred, await asyncio.gather(*(invoke(role) for role in deferred))))
+        results = tuple(completed[role] for role in ROLES)
         report = AgentAnalysisReport(correlation_id, instrument_id, now, results)
         return aggregate(report, self.policy, fingerprint(evidence))
 

@@ -76,7 +76,19 @@ strict prompt/output handling, an opt-in loopback Ollama adapter with pinned
 model manifests, and recorded-outcome policy replay. No model is required by
 the deterministic baseline. Real model quality/hardware, news/fundamental
 provider entitlements and paper policy certification remain open gates.
-Orchestrator-to-paper integration and operational audit retention remain Phase 4.
+Operational audit retention remains Phase 4.
+
+### Phase 4 implementation baseline
+
+The [Phase 4 guide](./phase-4.md) documents the paper-only Alpaca adapter and
+programmatic session controller connecting research, required analyst policy,
+Risk Warden and gated order submission. The complete flow is tested with a
+simulated broker. Circuit baselines/trips persist in the local journal.
+The operator can persistently pause new entries and resume only after explicit
+broker reconciliation. An explicit async cadence runner requests expiry
+supervision and accepts caller-supplied session inputs; it is not auto-started
+or hard real-time. Remaining work includes more recovery tests; account-specific
+broker behavior remains unverified and requires separate paper-account testing.
 
 ## 5. Initial engineering backlog
 

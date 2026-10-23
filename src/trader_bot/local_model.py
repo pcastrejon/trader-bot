@@ -9,6 +9,8 @@ import json
 import math
 import re
 import socket
+import threading
+import time
 
 from trader_bot.agents import (
     ContractError, ModelIdentity, ModelUnavailable, object_fields, strict_json, text,
@@ -40,14 +42,22 @@ class LocalModelConfig:
 class OllamaLocalModel:
     def __init__(self, config: LocalModelConfig) -> None:
         self.config = config
+        self._generation_lock = threading.Lock()
 
     @property
     def identity(self) -> ModelIdentity:
         return ModelIdentity("local", self.config.model, self.config.version)
 
-    async def complete(self, system: str, user: str, timeout_seconds: float) -> str:
+    async def complete(
+        self, system: str, user: str, timeout_seconds: float, *,
+        response_schema: dict[str, object] | None = None,
+    ) -> str:
         if not self.config.enabled:
             raise ModelUnavailable("Local inference is disabled.")
+        if response_schema is not None:
+            system += "\nRequired response JSON schema:\n" + json.dumps(
+                response_schema, sort_keys=True, allow_nan=False,
+            )
         if (
             not math.isfinite(timeout_seconds) or not 0 < timeout_seconds <= 30
             or len(system) + len(user) > 400000
@@ -55,17 +65,39 @@ class OllamaLocalModel:
             raise ContractError("Local inference request exceeds deadline or prompt bounds.")
         # The synchronous socket also has a timeout; cancelling the await does not kill a thread.
         return await asyncio.wait_for(
-            asyncio.to_thread(self._complete, system, user, timeout_seconds), timeout_seconds,
+            asyncio.to_thread(
+                self._complete, system, user, timeout_seconds, response_schema,
+            ), timeout_seconds,
         )
 
-    def _complete(self, system: str, user: str, timeout_seconds: float) -> str:
+    def _complete(
+        self, system: str, user: str, timeout_seconds: float,
+        response_schema: dict[str, object] | None,
+    ) -> str:
+        deadline = time.monotonic() + timeout_seconds
+        # Keep the lock in the worker: cancelling the await does not stop socket work.
+        if not self._generation_lock.acquire(timeout=timeout_seconds):
+            raise TimeoutError("Local inference deadline expired while queued.")
+        try:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("Local inference deadline expired while queued.")
+            return self._generate(system, user, remaining, response_schema)
+        finally:
+            self._generation_lock.release()
+
+    def _generate(
+        self, system: str, user: str, timeout_seconds: float,
+        response_schema: dict[str, object] | None,
+    ) -> str:
         payload = json.dumps({
-            "model": self.config.model, "stream": False, "format": "json",
+            "model": self.config.model, "stream": False,
+            "format": response_schema if response_schema is not None else "json",
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
-            "options": {"temperature": 0, "seed": 0, "num_predict": 1024},
+            "options": {"temperature": 0, "seed": 0, "num_predict": 256},
         }, allow_nan=False).encode("utf-8")
         connection = http.client.HTTPConnection(
             "127.0.0.1", self.config.port, timeout=timeout_seconds,
@@ -104,6 +136,8 @@ class OllamaLocalModel:
                 raise ContractError("Local response must be an object.")
             if item.get("model") != self.config.model or item.get("done") is not True:
                 raise ContractError("Local response model mismatch or incomplete generation.")
+            if item.get("done_reason") == "length":
+                raise ContractError("Local response exhausted its generation token limit.")
             message = object_fields(item.get("message"), {"role", "content"})
             if message["role"] != "assistant":
                 raise ContractError("Local response has unexpected role.")

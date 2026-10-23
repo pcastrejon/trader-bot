@@ -103,6 +103,58 @@ class IndependentAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(json.loads(user)["untrusted_evidence"][0]["content"], record.content)
         self.assertNotIn("tools", json.loads(user))
 
+    async def test_each_role_receives_schema_with_only_its_permitted_citations(self) -> None:
+        fields = {
+            "summary", "facts", "interpretation", "uncertainty",
+            "veto", "warnings", "source_refs",
+        }
+        for agent in local_agents(self.model):
+            record = next(item for item in evidence() if item.role is agent.role)
+            await agent.analyze(self.request(record), (record,))
+            schema = self.model.schemas[-1]
+            self.assertIsNotNone(schema)
+            assert schema is not None
+            self.assertEqual(schema["type"], "object")
+            self.assertFalse(schema["additionalProperties"])
+            self.assertEqual(set(schema["required"]), fields)
+            properties = schema["properties"]
+            self.assertEqual(set(properties), fields)
+            refs = properties["source_refs"]
+            self.assertEqual(refs["items"]["enum"], [record.reference.reference])
+            self.assertEqual(refs["minItems"], 1)
+            self.assertEqual(refs["maxItems"], 1)
+            self.assertTrue(refs["uniqueItems"])
+            self.assertEqual(
+                properties["uncertainty"]["enum"], ["low", "medium", "high", "unknown"],
+            )
+            self.assertEqual(
+                properties["veto"],
+                {"type": "boolean", "enum": [False]}
+                if agent.role is AgentRole.FUNDAMENTAL_CONTEXT else {"type": "boolean"},
+            )
+            self.assertEqual(
+                json.loads(self.model.calls[-1][1])["allowed_source_refs"],
+                [record.reference.reference],
+            )
+
+    def test_schema_allows_all_supplied_references_without_cross_request_leaks(self) -> None:
+        record = evidence()[0]
+        agent = TechnicalContextAgent(self.model)
+        request = self.request(record)
+        other_ref = replace(record.reference, reference="technical-2")
+        schema = agent.response_schema(replace(
+            request, input_refs=(record.reference, other_ref),
+        ))
+        refs = schema["properties"]["source_refs"]
+        self.assertEqual(refs["items"]["enum"], ["technical-1", "technical-2"])
+        self.assertEqual(refs["maxItems"], 2)
+        next_schema = agent.response_schema(request)
+        self.assertEqual(
+            next_schema["properties"]["source_refs"]["items"]["enum"], ["technical-1"],
+        )
+        with self.assertRaises(ContractError):
+            agent.response_schema(replace(request, input_refs=()))
+
     async def test_independent_agent_rejects_cross_role_or_reference_input(self) -> None:
         record = evidence()[0]
         for request in (
@@ -149,6 +201,48 @@ class IndependentAgentTests(unittest.IsolatedAsyncioTestCase):
                 self.request(record), completion("fundamental-1", veto=True),
             )
 
+    async def test_numeric_claims_are_grounded_in_cited_evidence(self) -> None:
+        record = evidence()[0]
+        agent = TechnicalContextAgent(self.model)
+        for field in ("summary", "interpretation", "facts", "warnings"):
+            for claim in (
+                "Volume is 100,000 shares.", "Volume is 100000.",
+                "Volume is one hundred thousand shares.", "Volume is 100k shares.",
+                "Volume is 100 K shares.",
+                "Volume rose 2%.", "Volume is 1e5 shares.",
+                "Volume changed .5 shares.", "Volume changed 100 basis points.",
+            ):
+                output = [claim] if field in ("facts", "warnings") else claim
+                self.model.outputs[record.role.value] = completion(
+                    "technical-1", **{field: output},
+                )
+                with self.subTest(field=field, claim=claim), self.assertRaises(ContractError):
+                    await agent.analyze(self.request(record), (record,))
+        for claim in ("Volume is 10,000 shares.", "Volume is 10000.0 shares.",
+                      "Volume is 1e4 shares.", "EMA9 is 101; ATR14 is 2."):
+            self.model.outputs[record.role.value] = completion("technical-1", summary=claim)
+            result = await agent.analyze(self.request(record), (record,))
+            self.assertEqual(result.status, AgentStatus.OK)
+
+    async def test_uncited_and_cross_role_numbers_cannot_support_claims(self) -> None:
+        technical, news, fundamental = evidence()
+        other = replace(
+            technical, reference=replace(technical.reference, reference="other"),
+            metrics=tuple(
+                replace(metric, value=Decimal("100000")) if metric.name == "volume" else metric
+                for metric in technical.metrics
+            ),
+        )
+        self.model.outputs[technical.role.value] = completion(
+            "technical-1", summary="Volume is 100000 shares.",
+        )
+        request = replace(self.request(technical), input_refs=(technical.reference, other.reference))
+        with self.assertRaises(ContractError):
+            await TechnicalContextAgent(self.model).analyze(request, (technical, other))
+        self.model.outputs[news.role.value] = completion("news-1", summary="Revenue is 1000000.")
+        with self.assertRaises(ContractError):
+            await NewsSentimentAgent(self.model).analyze(self.request(news), (news,))
+
 
 class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
@@ -171,6 +265,36 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.can_continue)
         self.assertEqual(len(result.reason_codes), 2)
         self.assertTrue(all(r.status is AgentStatus.UNAVAILABLE for r in result.report.results))
+
+    async def test_local_optional_role_does_not_compete_with_required_roles(self) -> None:
+        self.model.identity = ModelIdentity("local", "synthetic-local", "1")
+        result = await self.orchestrator.analyze("corr", "US:DEMO", evidence())
+        self.assertEqual(
+            [json.loads(user)["role"] for _, user in self.model.calls],
+            ["technical_context", "news_sentiment", "fundamental_context"],
+        )
+        self.assertEqual(tuple(item.role for item in result.report.results), tuple(AgentRole))
+        self.assertTrue(result.can_continue)
+
+    async def test_numeric_mismatch_holds_required_analysis(self) -> None:
+        self.model.outputs["technical_context"] = completion(
+            "technical-1", facts=["Volume is 100,000 shares."],
+        )
+        result = await self.orchestrator.analyze("corr", "US:DEMO", evidence())
+        self.assertFalse(result.can_continue)
+        self.assertIn("AGENT_INVALID:technical_context", result.reason_codes)
+
+    async def test_optional_local_role_has_no_new_deadline(self) -> None:
+        self.model.identity = ModelIdentity("local", "synthetic-local", "1")
+        self.model.delay = 10
+        result = await AgentOrchestrator(
+            local_agents(self.model), AnalysisPolicy(timeout_seconds=1), clock=lambda: NOW,
+        ).analyze("corr", "US:DEMO", evidence())
+        self.assertEqual(len(self.model.calls), 2)
+        self.assertTrue(all(
+            item.status is AgentStatus.TIMED_OUT for item in result.report.results
+        ))
+        self.assertFalse(result.can_continue)
 
     async def test_optional_missing_fundamentals_never_blocks(self) -> None:
         result = await self.orchestrator.analyze("corr", "US:DEMO", evidence()[:2])
@@ -225,7 +349,10 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
         entered = 0
         ready = asyncio.Event()
 
-        async def late(_system: str, user: str, _timeout_seconds: float) -> str:
+        async def late(
+            _system: str, user: str, _timeout_seconds: float, *,
+            response_schema: dict[str, object] | None = None,
+        ) -> str:
             nonlocal entered
             entered += 1
             if entered == 3:
@@ -241,7 +368,10 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(r.status is AgentStatus.TIMED_OUT for r in result.report.results))
 
     async def test_suppressed_cancellation_cannot_approve_after_monotonic_deadline(self) -> None:
-        async def suppress(_system: str, user: str, _timeout_seconds: float) -> str:
+        async def suppress(
+            _system: str, user: str, _timeout_seconds: float, *,
+            response_schema: dict[str, object] | None = None,
+        ) -> str:
             try:
                 await asyncio.sleep(10)
             except asyncio.CancelledError:
